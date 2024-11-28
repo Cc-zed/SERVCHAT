@@ -1,66 +1,75 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading;
 
 class Program
 {
-    private const string SERVER_IP = "127.0.0.1";
-    private const int SERVER_PORT = 12345;
-
-    private static UdpClient udpClient;
-    private static string username;
+    private const int PORT = 12345;
+    private const int MAX_CLIENTS = 5;
+    private static UdpClient udpServer;
+    private static List<IPEndPoint> clients = new List<IPEndPoint>();
 
     static void Main()
     {
-        Console.Write("Enter your username: ");
-        username = Console.ReadLine();
-
-        udpClient = new UdpClient();
-        IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse(SERVER_IP), SERVER_PORT);
-
-        // Connect to the server
-        string connectMessage = $"CONNECT:{username}";
-        udpClient.Send(Encoding.UTF8.GetBytes(connectMessage), connectMessage.Length, serverEndpoint);
-
-        // Start a thread to listen for incoming messages
-        Thread receiveThread = new Thread(ReceiveMessages);
-        receiveThread.Start();
-
-        // Send messages
-        while (true)
-        {
-            string message = Console.ReadLine();
-            if (message.ToLower() == "exit")
-            {
-                string disconnectMessage = $"DISCONNECT:{username}";
-                udpClient.Send(Encoding.UTF8.GetBytes(disconnectMessage), disconnectMessage.Length, serverEndpoint);
-                break;
-            }
-
-            string formattedMessage = $"MESSAGE:[{username}] {message}";
-            udpClient.Send(Encoding.UTF8.GetBytes(formattedMessage), formattedMessage.Length, serverEndpoint);
-        }
-    }
-
-    private static void ReceiveMessages()
-    {
-        IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Any, 0);
+        Console.WriteLine("Starting UDP Chat Server...");
+        udpServer = new UdpClient(PORT);
+        Console.WriteLine($"Server is listening on port {PORT}");
 
         while (true)
         {
             try
             {
-                byte[] receivedData = udpClient.Receive(ref serverEndpoint);
-                string receivedMessage = Encoding.UTF8.GetString(receivedData);
-                Console.WriteLine(receivedMessage);
+                // Receive data from clients
+                IPEndPoint clientEndpoint = new IPEndPoint(IPAddress.Any, 0);
+                byte[] receivedData = udpServer.Receive(ref clientEndpoint);
+
+                string message = Encoding.UTF8.GetString(receivedData);
+                Console.WriteLine($"Received: {message} from {clientEndpoint}");
+
+                if (message.StartsWith("CONNECT:"))
+                {
+                    if (clients.Count >= MAX_CLIENTS)
+                    {
+                        string error = "ERROR: Max clients reached.";
+                        udpServer.Send(Encoding.UTF8.GetBytes(error), error.Length, clientEndpoint);
+                        continue;
+                    }
+
+                    if (!clients.Contains(clientEndpoint))
+                    {
+                        clients.Add(clientEndpoint);
+                        string username = message.Substring(8).Trim();
+                        BroadcastMessage($"SERVER: {username} joined the chat.");
+                    }
+                }
+                else if (message.StartsWith("MESSAGE:"))
+                {
+                    BroadcastMessage(message.Substring(8).Trim());
+                }
+                else if (message.StartsWith("DISCONNECT:"))
+                {
+                    clients.Remove(clientEndpoint);
+                    string username = message.Substring(11).Trim();
+                    BroadcastMessage($"SERVER: {username} left the chat.");
+                }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error: {ex.Message}");
-                break;
             }
+        }
+    }
+
+    private static void BroadcastMessage(string message)
+    {
+        Console.WriteLine($"Broadcasting: {message}");
+        byte[] data = Encoding.UTF8.GetBytes(message);
+
+        foreach (var client in clients)
+        {
+            udpServer.Send(data, data.Length, client);
         }
     }
 }
